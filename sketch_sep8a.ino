@@ -1,41 +1,81 @@
-#include "arduino_secrets.h"   // Include a file that stores your secret credentials (e.g., Wi-Fi password).
-#include "thingProperties.h"    // Include a file for managing properties used in the Arduino IoT Cloud.
-#include <Wire.h>              // Include the Wire library for I2C communication.
-#include <BH1750.h>            // Include the BH1750 library for working with a light sensor.
+#include <DHT.h>
+#include <WiFiNINA.h>
+#include <ThingSpeak.h>
 
-BH1750 lightMeter;             // Create an instance of the BH1750 light sensor.
+// Define the pin for the DHT sensor and the sensor type
+#define DHT_SENSOR_PIN 2
+#define DHT_SENSOR_TYPE DHT11
 
-const long interval = 1000;    // Define a time interval (in milliseconds) for taking light measurements.
-unsigned long previousMillis = 0;  // Store the previous time when a measurement was taken.
+// WiFi credentials
+#define WIFI_SSID "Tanmaya's Iphone (2)"
+#define WIFI_PASS "tanmayaspw"
 
-float light_level;             // Store the current light level reading.
-const float LIGHT_THRESHOLD = 1000;  // Define a threshold value for detecting sunlight.
+// ThingSpeak credentials
+#define THINGSPEAK_CHANNEL_ID 2249474
+#define THINGSPEAK_API_KEY "X46C19PYVXSZT11K"
+
+// Create DHT object and WiFiClient object
+DHT dht(DHT_SENSOR_PIN, DHT_SENSOR_TYPE);
+WiFiClient client;
 
 void setup() {
-  Serial.begin(9600);         // Start serial communication at a baud rate of 9600 (for debugging).
-  Wire.begin();               // Initialize the I2C communication.
-  lightMeter.begin();         // Initialize the BH1750 light sensor.
-  initProperties();            // Initialize properties used for IoT communication.
-  ArduinoCloud.begin(ArduinoIoTPreferredConnection);  // Initialize the Arduino IoT Cloud.
-  setDebugMessageLevel(2);    // Set the debug message level to 2 (for debugging purposes).
+  // Initialize serial communication at 9600 baud
+  Serial.begin(9600);
+
+  // Initialize the DHT sensor
+  dht.begin();
+
+  // Connect to WiFi
+  connectToWiFi();
+
+  // Initialize ThingSpeak
+  ThingSpeak.begin(client);
 }
 
 void loop() {
-  ArduinoCloud.update();      // Update the Arduino IoT Cloud connection.
-  unsigned long currentMillis = millis();  // Get the current time in milliseconds.
-  
-  // Check if it's time to take a new light measurement.
-  if (currentMillis - previousMillis >= interval) {
-    previousMillis = currentMillis;  // Update the previous measurement time.
-    light_level = lightMeter.readLightLevel();  // Read the current light level.
-    
-    // Check if the light level is above the threshold and if sunlight_update is not "started."
-    if (light_level >= LIGHT_THRESHOLD && sunlight_update != "started") {
-      sunlight_update = "started";  // Start updating sunlight status.
-    }
-    // Check if the light level is below the threshold and if sunlight_update is not "stopped."
-    else if (light_level < LIGHT_THRESHOLD && sunlight_update != "stopped") {
-      sunlight_update = "stopped";  // Stop updating sunlight status.
-    }
+  // Read temperature and humidity from the DHT sensor
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+
+  // Check if the sensor readings are valid
+  if (areReadingsValid(temperature, humidity)) {
+    // Send data to ThingSpeak
+    sendDataToThingSpeak(temperature, humidity);
+  } else {
+    Serial.println("Error reading sensor data!");
+  }
+
+  // Delay for 30 seconds before the next iteration
+  delay(30000);
+}
+
+// Function to connect to WiFi
+void connectToWiFi() {
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+  }
+  Serial.println("Connected to WiFi");
+}
+
+// Function to check if sensor readings are valid
+bool areReadingsValid(float temp, float humidity) {
+  return !isnan(temp) && !isnan(humidity);
+}
+
+// Function to send data to ThingSpeak
+void sendDataToThingSpeak(float temp, float humidity) {
+  // Set the fields for temperature and humidity
+  ThingSpeak.setField(1, temp);
+  ThingSpeak.setField(2, humidity);
+
+  // Write the fields to the ThingSpeak channel
+  int httpCode = ThingSpeak.writeFields(THINGSPEAK_CHANNEL_ID, THINGSPEAK_API_KEY);
+
+  // Check if the data was sent successfully
+  if (httpCode == 200) {
+    Serial.println("Data sent to ThingSpeak successfully");
+  } else {
+    Serial.println("Error sending data to ThingSpeak");
   }
 }
